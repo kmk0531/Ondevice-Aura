@@ -80,6 +80,7 @@ def get_node_c():
         if _node_c_instance is None:
             log_event("Node C", "INIT", "NodeC 엔진 초기화 중 (모델 로드 포함)...")
             _node_c_instance = NodeC()
+            log_event("Node C", "INIT", "✅ NodeC 엔진 초기화 완료 (분석 준비 완료)")
     return _node_c_instance
 
 def process_and_build_request(session_id, user_text, nonverbal_vector, candidates, fused_emotion):
