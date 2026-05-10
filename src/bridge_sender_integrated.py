@@ -125,10 +125,11 @@ def process_and_build_request(session_id, user_text, nonverbal_vector, candidate
         valence=fused_emotion.valence,
         arousal=fused_emotion.arousal,
         timestamp=int(time.time()),
-        candidates=candidates,
+        # candidates 필드는 아래에서 extend로 처리합니다.
         fused_emotion=fused_emotion,
         user_text=user_text
     )
+    request.candidates.extend(candidates)
 
     return request
 
