@@ -84,14 +84,17 @@ def get_node_c():
                 log_event("Node C", "INIT", "✅ NodeC 엔진 초기화 완료 (분석 준비 완료)")
     return _node_c_instance
 
-def process_and_build_request(session_id, user_text, nonverbal_vector, candidates, fused_emotion):
+def process_and_build_request(session_id, user_text, candidates, fused_emotion,
+                              face_va=None, voice_va=None):
     request_id = f"turn_{uuid.uuid4().hex[:8]}"
     
-    # [안전성] Numpy 배열 타입 강제 변환 (잠재적 연산 에러 방지)
-    if not isinstance(nonverbal_vector, np.ndarray):
-        nonverbal_vector = np.array(nonverbal_vector, dtype=np.float32)
-    
-    # [성능 최적화] 텍스트가 없는 경우 (표정 데이터 전송 등) 무거운 분석 엔진 초기화를 건너뜁니다.
+    # [안전성] 비언어 벡터 타입 강제 변환
+    if face_va is not None and not isinstance(face_va, np.ndarray):
+        face_va = np.array(face_va, dtype=np.float32)
+    if voice_va is not None and not isinstance(voice_va, np.ndarray):
+        voice_va = np.array(voice_va, dtype=np.float32)
+
+    # [성능 최적화] 텍스트가 없는 경우 무거운 분석 엔진 초기화를 건너뜁니다.
     if not user_text or user_text.strip() == "":
         log_event("Node C", request_id, "텍스트 없음: 분석 스킵 및 즉시 조립")
         node_c_result = {
@@ -102,7 +105,7 @@ def process_and_build_request(session_id, user_text, nonverbal_vector, candidate
     else:
         node_c = get_node_c()
         log_event("Node C", request_id, f"분석 시작 (텍스트: {user_text[:15]}...)")
-        node_c_result = node_c.process_data(user_text, nonverbal_vector)
+        node_c_result = node_c.process_data(user_text, face_va=face_va, voice_va=voice_va)
     
     kg_context_str = node_c_result.get("kg_context_formatted", "관련 배경지식 없음.")
     alignment = node_c_result["alignment"]

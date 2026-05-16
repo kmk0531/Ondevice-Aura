@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 from neo4j import GraphDatabase
 from deep_translator import GoogleTranslator
 import numpy as np
@@ -213,6 +213,43 @@ class AlignmentChecker:
         }
 
 # ==========================================
+# 4.5. 3-모달 감정 융합 레이어 (Modal Fusion)
+# ==========================================
+class ModalFusionLayer:
+    """
+    표정(face), 음성 톤(voice), 텍스트 감성(text) 세 신호를
+    가중 평균으로 융합하여 단일 감정 벡터를 생성합니다.
+
+    가중치 근거:
+    - 비언어 신호(표정+음성)가 언어보다 감정 표현에 직접적이므로 0.4씩 부여
+    - 텍스트는 사회적 필터링이 개입될 수 있으므로 0.2 부여
+    - 신호가 일부 없을 경우 나머지 신호의 가중치를 비례적으로 재정규화
+    """
+    WEIGHTS = {'face': 0.4, 'voice': 0.4, 'text': 0.2}
+
+    def fuse(self,
+             face_va: Optional[np.ndarray] = None,
+             voice_va: Optional[np.ndarray] = None,
+             text_va: Optional[np.ndarray] = None) -> np.ndarray:
+        """제공된 신호만 사용해 가중 평균 계산. 없는 신호는 자동 제외 후 가중치 재정규화."""
+        signals, weights = [], []
+        if face_va is not None:
+            signals.append(np.asarray(face_va, dtype=np.float32))
+            weights.append(self.WEIGHTS['face'])
+        if voice_va is not None:
+            signals.append(np.asarray(voice_va, dtype=np.float32))
+            weights.append(self.WEIGHTS['voice'])
+        if text_va is not None:
+            signals.append(np.asarray(text_va, dtype=np.float32))
+            weights.append(self.WEIGHTS['text'])
+
+        if not signals:
+            return np.array([0.0, 0.0], dtype=np.float32)
+
+        total = sum(weights)
+        return sum((w / total) * s for w, s in zip(weights, signals))
+
+# ==========================================
 # 4.5 KG 결과를 구조화된 프롬프트로 변환
 # ==========================================
 def format_kg_for_prompt(kg_results: List[Dict]) -> str:
@@ -252,14 +289,33 @@ class NodeC:
         self.text_processor = TextProcessor(enable_mecab=True)
         self.sentiment_analyzer = TextSentimentAnalyzer(enable=True)
         self.alignment_checker = AlignmentChecker(threshold=0.5)
+        self.modal_fusion = ModalFusionLayer()
+        # 세션 간 비언어 신호 상태 유지 (표정/음성이 별도 호출로 들어오므로)
+        self.last_face_va: Optional[np.ndarray] = None
+        self.last_voice_va: Optional[np.ndarray] = None
 
-    def process_data(self, text: str, nonverbal_vector: np.ndarray) -> Dict:
+    def process_data(self,
+                     text: str,
+                     face_va: Optional[np.ndarray] = None,
+                     voice_va: Optional[np.ndarray] = None) -> Dict:
+        """
+        text       : STT 또는 사용자 입력 텍스트
+        face_va    : 표정 분석 결과 [valence, arousal] (없으면 이전 값 재사용)
+        voice_va   : 음성 톤 분석 결과 [valence, arousal] (없으면 이전 값 재사용)
+        """
         start_time = time.time()
-        
-        # 텍스트가 없는 경우 (표정 데이터만 들어온 경우 등) 무거운 분석 프로세스 스킵
+
+        # 수신된 신호로 세션 상태 업데이트
+        if face_va is not None:
+            self.last_face_va = np.asarray(face_va, dtype=np.float32)
+        if voice_va is not None:
+            self.last_voice_va = np.asarray(voice_va, dtype=np.float32)
+
+        # 텍스트가 없는 경우 무거운 분석 스킵
         if not text or text.strip() == "":
             return {
                 "kg_context": [],
+                "kg_context_formatted": "관련 배경지식 없음.",
                 "alignment": {"score": 1.0, "is_consistent": True, "detected_anomaly": "None"},
                 "priority": 1,
                 "latency_ms": 0.0
@@ -271,23 +327,33 @@ class NodeC:
         kg_context = self.kg_searcher.search_context(keywords)
         kg_context_formatted = format_kg_for_prompt(kg_context)
         print(f"완료 ({len(kg_context)}건)")
-        
-        # 2. 텍스트 감성 추출 (V-A 모델)
+
+        # 2. 텍스트 감성 추출 (V-A)
         print(f"    [Step 2] 텍스트 감정 분석 중...", end=" ", flush=True)
         text_sentiment = self.sentiment_analyzer.get_sentiment(text)
         print(f"완료 (V:{text_sentiment[0]:.2f}, A:{text_sentiment[1]:.2f})")
-        
-        # 3. Sentiment Alignment Check
-        alignment_result = self.alignment_checker.check_alignment(text_sentiment, nonverbal_vector)
-        
+
+        # 3. 3-모달 융합: 표정 + 음성 톤 → 비언어 융합 벡터
+        fused_nonverbal = self.modal_fusion.fuse(
+            face_va=self.last_face_va,
+            voice_va=self.last_voice_va
+        )
+        available = []
+        if self.last_face_va is not None: available.append('face')
+        if self.last_voice_va is not None: available.append('voice')
+        print(f"    [Step 3] 비언어 융합 ({'+'.join(available) if available else 'none'}): "
+              f"V:{fused_nonverbal[0]:.2f}, A:{fused_nonverbal[1]:.2f}")
+
+        # 4. Alignment Check: 텍스트 감성 vs 융합된 비언어 벡터
+        alignment_result = self.alignment_checker.check_alignment(text_sentiment, fused_nonverbal)
+
         latency_ms = (time.time() - start_time) * 1000
-        
-        # PyTorch Fused Embedding 없이 순수 맥락(Context)만 반환
-        payload = {
+
+        return {
             "kg_context": kg_context,
             "kg_context_formatted": kg_context_formatted,
             "alignment": alignment_result,
+            "fused_nonverbal": fused_nonverbal.tolist(),
             "priority": 2 if not alignment_result["is_consistent"] else 1,
             "latency_ms": round(latency_ms, 2)
         }
-        return payload

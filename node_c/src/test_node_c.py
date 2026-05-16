@@ -22,7 +22,7 @@ def run_tests():
     face_v1, face_a1 = 0.8, -0.2  # 표정: 긍정적이고 차분함 (억지 웃음)
     face_vector1 = np.array([face_v1, face_a1], dtype=np.float32)
     
-    result1 = node_c.process_data(text1, face_vector1)
+    result1 = node_c.process_data(text1, face_va=face_vector1)
     
     print(f" - 입력 텍스트: {text1}")
     print(f" - 추출된 키워드: {node_c.text_processor.extract_keywords(text1)}")
@@ -37,7 +37,22 @@ def run_tests():
     face_v2, face_a2 = -0.8, 0.3  # 표정: 부정적이고 스트레스 받음 (우울함)
     face_vector2 = np.array([face_v2, face_a2], dtype=np.float32)
     
-    result2 = node_c.process_data(text2, face_vector2)
+    result2 = node_c.process_data(text2, face_va=face_vector2)
+
+    # --- 테스트 3: 표정 + 음성 모두 있는 경우 (3-모달 융합) ---
+    print("\n[Test 3] 3-모달 융합 (표정 + 음성 톤 + 텍스트 동시 입력)")
+    text3 = "요즘 너무 피곤해서 힘들어."
+    face_vector3 = np.array([-0.5, 0.1], dtype=np.float32)  # 표정: 약간 부정적, 차분
+    voice_vector3 = np.array([-0.7, 0.6], dtype=np.float32)  # 음성: 부정적, 높은 각성
+    # 먼저 face_va로 상태를 세팅하고, voice_va도 함께 전달
+    result3 = node_c.process_data(text3, face_va=face_vector3, voice_va=voice_vector3)
+
+    print(f" - 입력 텍스트: {text3}")
+    print(f" - 표정 (V, A): {face_vector3.tolist()}")
+    print(f" - 음성 톤 (V, A): {voice_vector3.tolist()}")
+    print(" - 반환 결과:")
+    for k, v in result3.items():
+        print(f"   * {k}: {v}")
     
     print(f" - 입력 텍스트: {text2}")
     print(f" - 추출된 키워드: {node_c.text_processor.extract_keywords(text2)}")
