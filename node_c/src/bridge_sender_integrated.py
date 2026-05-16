@@ -7,7 +7,7 @@ import os
 
 # 현재 경로 추가 (node_c_prototype 참조용)
 sys.path.append(os.path.dirname(__file__))
-from node_c_prototype import NodeC
+from node_c_prototype import NodeC, format_kg_for_prompt
 
 import aura_pb2
 import aura_pb2_grpc
@@ -96,6 +96,7 @@ def process_and_build_request(session_id, user_text, nonverbal_vector, candidate
         log_event("Node C", request_id, "텍스트 없음: 분석 스킵 및 즉시 조립")
         node_c_result = {
             "kg_context": [],
+            "kg_context_formatted": "관련 배경지식 없음.",
             "alignment": {"score": 1.0, "is_consistent": True},
         }
     else:
@@ -103,7 +104,7 @@ def process_and_build_request(session_id, user_text, nonverbal_vector, candidate
         log_event("Node C", request_id, f"분석 시작 (텍스트: {user_text[:15]}...)")
         node_c_result = node_c.process_data(user_text, nonverbal_vector)
     
-    kg_context_str = "\n".join(node_c_result["kg_context"])
+    kg_context_str = node_c_result.get("kg_context_formatted", "관련 배경지식 없음.")
     alignment = node_c_result["alignment"]
 
     # 정렬도 검사(Alignment Check) 결과에 따른 알림 생성

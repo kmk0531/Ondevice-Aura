@@ -8,6 +8,35 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # ==========================================
+# 공감 관련 ATOMIC Relation 설정
+# ==========================================
+EMPATHY_RELATIONS = ['xReact', 'oReact', 'xWant', 'oWant', 'xEffect', 'oEffect', 'xIntent', 'xAttr', 'xNeed']
+
+RELATION_WEIGHTS = {
+    'xReact': 1.0,   # 가장 중요 — PersonX 감정 반응
+    'oReact': 0.9,   # 타인의 감정 반응
+    'xWant':  0.7,   # PersonX의 욕구
+    'xEffect': 0.7,  # PersonX에 미치는 영향
+    'xIntent': 0.6,  # PersonX의 의도
+    'xNeed':  0.6,   # PersonX에게 필요한 것
+    'xAttr':  0.5,   # PersonX의 성격/속성
+    'oWant':  0.5,   # 타인의 욕구
+    'oEffect': 0.5,  # 타인에게 미치는 영향
+}
+
+RELATION_LABELS_KO = {
+    'xReact':  '예상 감정 반응',
+    'oReact':  '주변인의 감정 반응',
+    'xWant':   '예상 욕구/바람',
+    'oWant':   '주변인의 욕구/바람',
+    'xEffect': '예상 결과/영향',
+    'oEffect': '주변인에 대한 영향',
+    'xIntent': '추정 의도',
+    'xAttr':   '성격/속성',
+    'xNeed':   '필요한 것',
+}
+
+# ==========================================
 # 1. Neo4j 연동 모듈 (Knowledge Graph)
 # ==========================================
 class KGSearcher:
@@ -29,7 +58,10 @@ class KGSearcher:
         if self.enable_db and hasattr(self, 'driver'):
             self.driver.close()
 
-    def search_context(self, keywords_ko: List[str]) -> List[str]:
+    def search_context(self, keywords_ko: List[str]) -> List[Dict]:
+        """KG 검색 결과를 구조화된 딕셔너리 리스트로 반환합니다.
+        Returns: [{source, relation, target, weight}, ...]
+        """
         contexts = []
         if not keywords_ko:
             return contexts
@@ -56,28 +88,36 @@ class KGSearcher:
                 search_keywords = keywords_ko
 
             try:
-                # 정규표현식은 100만 개 노드에서 너무 느리므로(18초 이상),
-                # 단어 경계 매칭을 빠른 문자열 함수로 대체합니다.
+                # 개별 관계 레이블(xReact, oReact 등)로 검색하여 인덱스 활용
                 query = """
-                MATCH (n:Concept)-[r:ATOMIC_REL]->(m:Concept)
-                WHERE any(kw IN $keywords WHERE 
+                MATCH (n:Concept)-[r]->(m:Concept)
+                WHERE type(r) IN $relations
+                AND any(kw IN $keywords WHERE 
                     toLower(n.name) CONTAINS (' ' + kw + ' ') OR 
                     toLower(n.name) STARTS WITH (kw + ' ') OR 
                     toLower(n.name) ENDS WITH (' ' + kw) OR 
                     toLower(n.name) = kw
                 )
-                RETURN n.name AS source, r.type AS relation, m.name AS target
-                LIMIT 5
+                RETURN n.name AS source, type(r) AS relation, m.name AS target
+                LIMIT 10
                 """
                 
                 with self.driver.session() as session:
-                    result = session.run(query, keywords=search_keywords)
+                    result = session.run(query, keywords=search_keywords, relations=EMPATHY_RELATIONS)
                     for record in result:
-                        contexts.append(f"{record['source']}(은)는 {record['target']}(와)과 {record['relation']} 관계임")
+                        rel = record['relation']
+                        contexts.append({
+                            'source': record['source'],
+                            'relation': rel,
+                            'target': record['target'],
+                            'weight': RELATION_WEIGHTS.get(rel, 0.5),
+                        })
             except Exception as e:
                 print(f"Neo4j Query Error: {e}")
 
-        return contexts
+        # 공감 관련도(weight) 기준으로 정렬 — 감정 반응이 최우선
+        contexts.sort(key=lambda x: x['weight'], reverse=True)
+        return contexts[:7]
 
 # ==========================================
 # 2. 텍스트 키워드 추출 (Entity Linking)
@@ -173,6 +213,37 @@ class AlignmentChecker:
         }
 
 # ==========================================
+# 4.5 KG 결과를 구조화된 프롬프트로 변환
+# ==========================================
+def format_kg_for_prompt(kg_results: List[Dict]) -> str:
+    """KG 검색 결과를 관계 타입별로 그룹핑하여 LLM이 이해하기 쉬운 형태로 변환"""
+    if not kg_results:
+        return "관련 배경지식 없음."
+    
+    from collections import defaultdict
+    groups = defaultdict(list)
+    
+    for item in kg_results:
+        rel = item['relation']
+        category = RELATION_LABELS_KO.get(rel, rel)
+        target = item['target']
+        # 중복 제거
+        if target not in groups[category]:
+            groups[category].append(target)
+    
+    # 카테고리 순서 고정 (감정 > 욕구 > 영향 > 기타)
+    order = ['예상 감정 반응', '주변인의 감정 반응', '예상 욕구/바람', '주변인의 욕구/바람',
+             '예상 결과/영향', '주변인에 대한 영향', '추정 의도', '필요한 것', '성격/속성']
+    
+    sections = []
+    for category in order:
+        if category in groups:
+            lines = [f"  - {t}" for t in groups[category]]
+            sections.append(f"[{category}]\n" + "\n".join(lines))
+    
+    return "\n\n".join(sections)
+
+# ==========================================
 # 5. Node C 메인 파이프라인 (팀 구조에 맞춰 PyTorch Fusion 제거)
 # ==========================================
 class NodeC:
@@ -198,6 +269,7 @@ class NodeC:
         print(f"    [Step 1] 키워드 추출 및 KG 검색 중...", end=" ", flush=True)
         keywords = self.text_processor.extract_keywords(text)
         kg_context = self.kg_searcher.search_context(keywords)
+        kg_context_formatted = format_kg_for_prompt(kg_context)
         print(f"완료 ({len(kg_context)}건)")
         
         # 2. 텍스트 감성 추출 (V-A 모델)
@@ -213,6 +285,7 @@ class NodeC:
         # PyTorch Fused Embedding 없이 순수 맥락(Context)만 반환
         payload = {
             "kg_context": kg_context,
+            "kg_context_formatted": kg_context_formatted,
             "alignment": alignment_result,
             "priority": 2 if not alignment_result["is_consistent"] else 1,
             "latency_ms": round(latency_ms, 2)

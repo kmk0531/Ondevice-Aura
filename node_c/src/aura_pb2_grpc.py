@@ -26,7 +26,11 @@ if _version_not_supported:
 
 
 class AuraServiceStub(object):
-    """Missing associated documentation comment in .proto file."""
+    """==========================================
+    Services
+    ==========================================
+
+    """
 
     def __init__(self, channel):
         """Constructor.
@@ -42,7 +46,11 @@ class AuraServiceStub(object):
 
 
 class AuraServiceServicer(object):
-    """Missing associated documentation comment in .proto file."""
+    """==========================================
+    Services
+    ==========================================
+
+    """
 
     def GenerateEmpathy(self, request, context):
         """Missing associated documentation comment in .proto file."""
@@ -67,7 +75,11 @@ def add_AuraServiceServicer_to_server(servicer, server):
 
  # This class is part of an EXPERIMENTAL API.
 class AuraService(object):
-    """Missing associated documentation comment in .proto file."""
+    """==========================================
+    Services
+    ==========================================
+
+    """
 
     @staticmethod
     def GenerateEmpathy(request,
@@ -200,6 +212,78 @@ class AuraPerception(object):
             target,
             '/aura.AuraPerception/SendVoicePerception',
             aura__pb2.EmotionCandidate.SerializeToString,
+            aura__pb2.EmpathyResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+
+class AuraTTSStub(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def __init__(self, channel):
+        """Constructor.
+
+        Args:
+            channel: A grpc.Channel.
+        """
+        self.SendDialogue = channel.unary_unary(
+                '/aura.AuraTTS/SendDialogue',
+                request_serializer=aura__pb2.TTSRequest.SerializeToString,
+                response_deserializer=aura__pb2.EmpathyResponse.FromString,
+                _registered_method=True)
+
+
+class AuraTTSServicer(object):
+    """Missing associated documentation comment in .proto file."""
+
+    def SendDialogue(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+
+def add_AuraTTSServicer_to_server(servicer, server):
+    rpc_method_handlers = {
+            'SendDialogue': grpc.unary_unary_rpc_method_handler(
+                    servicer.SendDialogue,
+                    request_deserializer=aura__pb2.TTSRequest.FromString,
+                    response_serializer=aura__pb2.EmpathyResponse.SerializeToString,
+            ),
+    }
+    generic_handler = grpc.method_handlers_generic_handler(
+            'aura.AuraTTS', rpc_method_handlers)
+    server.add_generic_rpc_handlers((generic_handler,))
+    server.add_registered_method_handlers('aura.AuraTTS', rpc_method_handlers)
+
+
+ # This class is part of an EXPERIMENTAL API.
+class AuraTTS(object):
+    """Missing associated documentation comment in .proto file."""
+
+    @staticmethod
+    def SendDialogue(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/aura.AuraTTS/SendDialogue',
+            aura__pb2.TTSRequest.SerializeToString,
             aura__pb2.EmpathyResponse.FromString,
             options,
             channel_credentials,
